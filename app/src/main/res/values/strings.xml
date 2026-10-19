@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Project Compass</string>
+    <string name="nav_my_projects">My Projects</string>
+    <string name="nav_updates_review">Review Queue</string>
+    <string name="nav_unassigned_inbox">Inbox</string>
+    <string name="nav_settings_backups">Backups</string>
+    <string name="stage_1_badge">Stage 1: Foundation (100% Read-Only Folder Mode)</string>
+    <string name="action_new_project">New Project</string>
+    <string name="action_link_folder">Connect Folder</string>
+    <string name="action_scan_folder">Scan Folder (Read-Only)</string>
+    <string name="action_export_handover">Export Handover (.md)</string>
+    <string name="action_create_backup">Create Backup</string>
+    <string name="action_restore_backup">Preview &amp; Restore Backup</string>
+</resources>

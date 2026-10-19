@@ -1,0 +1,6 @@
+{
+  "summary": "Updated Project Compass Technical Design and Implementation Proposal to replace the overly rigid wording with a practical policy: Stages 1–3 run natively offline with zero API needed, and if any external or AI service is ever helpful in Stage 4, we will explain its purpose, billing/limits, and offline alternative for explicit prior approval first.",
+  "updatedAt": "2026-10-17T16:56:05.897845365Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

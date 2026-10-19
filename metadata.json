@@ -1,0 +1,6 @@
+{
+  "name": "Project Compass",
+  "description": "Offline-first project headquarters and evidence-backed Project Brain for managing AI handovers, requirements, decisions, verified progress, and change trails.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
