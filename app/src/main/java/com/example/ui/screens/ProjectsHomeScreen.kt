@@ -20,10 +20,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.Button
@@ -166,10 +170,18 @@ fun ProjectsHomeScreen(
     onOpenProject: (String) -> Unit,
     onCreateProject: (String, String, ProjectType, String) -> Unit,
     onUpdateProjectStatus: (ProjectEntity, ProjectStatus) -> Unit,
-    onImportDemoProject: () -> Unit
+    onConnectRootFolder: (Uri) -> Unit,
+    onDeleteProject: (ProjectEntity) -> Unit = {}
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            onConnectRootFolder(treeUri)
+        }
+    }
 
     val visibleProjects = remember(projects, showArchived) {
         if (showArchived) {
@@ -269,6 +281,27 @@ fun ProjectsHomeScreen(
                             color = CompassRuby,
                             textAlign = TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { folderPickerLauncher.launch(null) },
+                                modifier = Modifier.testTag("connect_root_folder_header_button")
+                            ) {
+                                Icon(Icons.Default.Folder, contentDescription = "Select Phone Folder", modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Select Phone Folder")
+                            }
+                            OutlinedButton(
+                                onClick = { showCreateDialog = true }
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "New Project", modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("New Project")
+                            }
+                        }
                     }
                 }
             }
@@ -337,25 +370,25 @@ fun ProjectsHomeScreen(
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            text = if (showArchived) "No Archived Projects" else "Watching Your Project Compass Folder",
+                            text = if (showArchived) "No Archived Projects" else "Connect Your Project Compass Folder",
                             style = MaterialTheme.typography.titleLarge,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "As FileMate moves your AI downloads into your Project Compass folder, each project will appear here automatically.",
+                            text = "Tap below to select your Project Compass folder on your phone. Every project folder inside it (including folders sorted by FileMate) will load here automatically.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
-                            onClick = onImportDemoProject,
-                            modifier = Modifier.testTag("import_demo_folder_button")
+                            onClick = { folderPickerLauncher.launch(null) },
+                            modifier = Modifier.testTag("connect_phone_folder_button")
                         ) {
-                            Icon(Icons.Default.Folder, contentDescription = "Sample", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Folder, contentDescription = "Select Folder", modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Preview Sample Project Folder")
+                            Text("Select Project Compass Folder on Phone")
                         }
                     }
                 }
@@ -496,27 +529,43 @@ fun ProjectsHomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    val targetStatus = if (project.status == ProjectStatus.ARCHIVED.name) {
-                                        ProjectStatus.ACTIVE
-                                    } else {
-                                        ProjectStatus.ARCHIVED
-                                    }
-                                    onUpdateProjectStatus(project, targetStatus)
-                                }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = if (project.status == ProjectStatus.ARCHIVED.name) {
-                                        Icons.Default.Unarchive
-                                    } else {
-                                        Icons.Default.Archive
-                                    },
-                                    contentDescription = "Archive or Restore",
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (project.status == ProjectStatus.ARCHIVED.name) "Restore" else "Archive")
+                                OutlinedButton(
+                                    onClick = {
+                                        val targetStatus = if (project.status == ProjectStatus.ARCHIVED.name) {
+                                            ProjectStatus.ACTIVE
+                                        } else {
+                                            ProjectStatus.ARCHIVED
+                                        }
+                                        onUpdateProjectStatus(project, targetStatus)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (project.status == ProjectStatus.ARCHIVED.name) {
+                                            Icons.Default.Unarchive
+                                        } else {
+                                            Icons.Default.Archive
+                                        },
+                                        contentDescription = "Archive or Restore",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(if (project.status == ProjectStatus.ARCHIVED.name) "Restore" else "Archive")
+                                }
+
+                                IconButton(
+                                    onClick = { onDeleteProject(project) },
+                                    modifier = Modifier.testTag("delete_project_button_${project.name}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Project",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
 
                             Button(

@@ -68,7 +68,7 @@ object SafeFileMover {
             if (localRootDir != null && localRootDir.exists()) {
                 executeLocalFileMove(dao, localRootDir, document, targetSubfolder, targetCategory, intentOp)
             } else if (!projectFolderUri.isNullOrBlank() && projectFolderUri.startsWith("content://")) {
-                executeSafTreeFileMove(context, dao, Uri.parse(projectFolderUri), document, targetSubfolder, targetCategory, intentOp)
+                executeSafTreeFileMove(context, dao, projectFolderUri, document, targetSubfolder, targetCategory, intentOp)
             } else {
                 // Logical subfolder path update when project has no physical folder linked yet
                 val updatedHistory = listOf(document.previousRelativePathsJson, document.currentRelativePath)
@@ -184,13 +184,19 @@ object SafeFileMover {
     private suspend fun executeSafTreeFileMove(
         context: Context,
         dao: CompassDao,
-        treeUri: Uri,
+        projectFolderUri: String,
         document: DocumentEntity,
         targetSubfolder: String,
         targetCategory: DocumentLifecycleCategory,
         intentOp: FileOperationJournalEntity
     ): SafeMoveResult {
         val resolver = context.contentResolver
+        val treeUri = Uri.parse(projectFolderUri.substringBefore("#childDocId="))
+        val rootDocId = if ("#childDocId=" in projectFolderUri) {
+            Uri.decode(projectFolderUri.substringAfter("#childDocId="))
+        } else {
+            DocumentsContract.getTreeDocumentId(treeUri)
+        }
         val sourceUri = if (document.currentSafUri.isNotBlank()) {
             Uri.parse(document.currentSafUri)
         } else {
@@ -205,7 +211,6 @@ object SafeFileMover {
             throw IllegalStateException("Source file changed since last scan")
         }
 
-        val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
         val rootDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootDocId)
 
         // Find or create target subfolder

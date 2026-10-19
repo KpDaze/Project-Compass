@@ -180,9 +180,13 @@ class CompassRepository(private val dao: CompassDao) {
             }
 
             val hasPermission = try {
-                val treeUri = Uri.parse(uriStr)
-                val docId = DocumentsContract.getTreeDocumentId(treeUri)
-                val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                val baseTreeUri = Uri.parse(uriStr.substringBefore("#childDocId="))
+                val docId = if ("#childDocId=" in uriStr) {
+                    Uri.decode(uriStr.substringAfter("#childDocId="))
+                } else {
+                    DocumentsContract.getTreeDocumentId(baseTreeUri)
+                }
+                val docUri = DocumentsContract.buildDocumentUriUsingTree(baseTreeUri, docId)
                 context.contentResolver.query(
                     docUri,
                     arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
@@ -227,9 +231,13 @@ class CompassRepository(private val dao: CompassDao) {
 
             val rawFiles = mutableListOf<RawFolderFile>()
             try {
-                val treeUri = Uri.parse(uriStr)
-                val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-                collectSafTreeFilesReadOnly(context, treeUri, rootDocId, "", rawFiles)
+                val baseTreeUri = Uri.parse(uriStr.substringBefore("#childDocId="))
+                val rootDocId = if ("#childDocId=" in uriStr) {
+                    Uri.decode(uriStr.substringAfter("#childDocId="))
+                } else {
+                    DocumentsContract.getTreeDocumentId(baseTreeUri)
+                }
+                collectSafTreeFilesReadOnly(context, baseTreeUri, rootDocId, "", rawFiles)
             } catch (e: Exception) {
                 return@withContext "Could not read folder: ${e.message}"
             }
@@ -610,30 +618,214 @@ class CompassRepository(private val dao: CompassDao) {
         return@withContext "Scan complete: $newFilesCount files processed, $autoSupersededCount old handovers auto-moved to Superseded/, $duplicatesMovedCount duplicates moved to Review_For_Deletion/, $safetyBrakeCount held by Safety Brake for your review."
     }
 
+    suspend fun deleteProjectCompletely(projectId: String) = withContext(Dispatchers.IO) {
+        dao.deleteWorkAreasForProject(projectId)
+        dao.deleteDocumentsForProject(projectId)
+        dao.deleteBrainItemsForProject(projectId)
+        dao.deleteChangeTrailForProject(projectId)
+        dao.deleteJournalForProject(projectId)
+        dao.deleteProjectById(projectId)
+    }
+
     suspend fun ensureInitialWorkspaceReady(context: Context) = withContext(Dispatchers.IO) {
+        // Automatically purge any leftover sample/demo "Botanical Field Journal" project if it was ever created
         val currentProjects = dao.getAllProjectsSnapshot()
-        if (currentProjects.isEmpty()) {
-            importDemoPopulatedProjectReadOnly(context)
-        } else {
-            scanAllProjectCompassFoldersAutomatically(context)
+        currentProjects.filter {
+            it.name.equals("Botanical Field Journal", ignoreCase = true) ||
+                (it.linkedFolderUri?.contains("demo_filemate_sorted_folder") == true)
+        }.forEach { demoProj ->
+            deleteProjectCompletely(demoProj.projectId)
         }
+        File(context.filesDir, "demo_filemate_sorted_folder").deleteRecursively()
+
+        scanAllProjectCompassFoldersAutomatically(context)
+    }
+
+    suspend fun connectRootCompassFolderOnPhone(context: Context, treeUri: Uri): String = withContext(Dispatchers.IO) {
+        try {
+            val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+        } catch (_: Exception) {
+        }
+
+        val prefs = context.getSharedPreferences("compass_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("root_compass_tree_uri", treeUri.toString()).apply()
+
+        val rootFolderName = treeUri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/')
+            ?.ifBlank { "Project Compass" } ?: "Project Compass"
+
+        val discoveredCount = discoverAndScanFromSafRootTree(context, treeUri, rootFolderName, createForRootIfNoSubfolders = true)
+        return@withContext "Connected '$rootFolderName' on your phone ($discoveredCount project folder(s) scanned)."
+    }
+
+    private suspend fun discoverAndScanFromSafRootTree(
+        context: Context,
+        treeUri: Uri,
+        rootFolderName: String,
+        createForRootIfNoSubfolders: Boolean
+    ): Int {
+        val existingProjects = dao.getAllProjectsSnapshot().toMutableList()
+        val existingDocs = dao.getAllDocumentsSnapshot()
+        val rootDocId = try {
+            DocumentsContract.getTreeDocumentId(treeUri)
+        } catch (_: Exception) {
+            return 0
+        }
+
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, rootDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+
+        val subfolders = mutableListOf<Pair<String, String>>() // docId to displayName
+        val looseFiles = mutableListOf<Pair<String, String>>() // docId to displayName
+
+        try {
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+                while (cursor.moveToNext()) {
+                    val childDocId = cursor.getString(idCol) ?: continue
+                    val displayName = cursor.getString(nameCol) ?: "Untitled"
+                    val mimeType = cursor.getString(mimeCol) ?: ""
+
+                    if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        if (!displayName.equals(SafeFileMover.SUBFOLDER_SUPERSEDED, ignoreCase = true) &&
+                            !displayName.equals(SafeFileMover.SUBFOLDER_DELETION_REVIEW, ignoreCase = true) &&
+                            !displayName.startsWith(".")
+                        ) {
+                            subfolders.add(childDocId to displayName)
+                        }
+                    } else if (!displayName.startsWith(".")) {
+                        looseFiles.add(childDocId to displayName)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            return 0
+        }
+
+        var projectsTouched = 0
+
+        if (subfolders.isNotEmpty()) {
+            // Each subfolder inside Project Compass is a Project
+            for ((childDocId, folderName) in subfolders) {
+                val expectedUri = "$treeUri#childDocId=${Uri.encode(childDocId)}"
+                var proj = existingProjects.firstOrNull {
+                    it.linkedFolderUri == expectedUri || it.name.equals(folderName.replace('_', ' '), ignoreCase = true)
+                }
+                if (proj == null) {
+                    val created = createProject(
+                        name = folderName.replace('_', ' '),
+                        purpose = "Project folder inside $rootFolderName.",
+                        projectType = ProjectType.SOFTWARE,
+                        resumePointSummary = "Check scanned files in $folderName."
+                    )
+                    proj = created.copy(
+                        linkedFolderUri = expectedUri,
+                        linkedFolderDisplayName = "$rootFolderName/$folderName",
+                        permissionState = FolderPermissionState.CONNECTED.name
+                    )
+                    dao.upsertProject(proj)
+                    existingProjects.add(proj)
+                } else if (proj.linkedFolderUri != expectedUri) {
+                    proj = proj.copy(
+                        linkedFolderUri = expectedUri,
+                        linkedFolderDisplayName = "$rootFolderName/$folderName",
+                        permissionState = FolderPermissionState.CONNECTED.name
+                    )
+                    dao.upsertProject(proj)
+                }
+                scanConnectedSafFolderReadOnly(context, proj.projectId)
+                projectsTouched++
+            }
+
+            // Any loose files sitting in the root Project Compass folder go to Unassigned Inbox
+            for ((fileDocId, fileName) in looseFiles) {
+                val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, fileDocId)
+                val bytes = try {
+                    context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() } ?: ByteArray(0)
+                } catch (_: Exception) {
+                    ByteArray(0)
+                }
+                if (bytes.isNotEmpty()) {
+                    val hash = OfflineDocumentEngine.computeSha256(bytes)
+                    if (existingDocs.none { it.sha256Hash == hash }) {
+                        val extracted = OfflineDocumentEngine.extractTextOffline(fileName, bytes)
+                        addIncomingItemToUnassignedInbox(
+                            titleOrFilename = fileName,
+                            textContent = extracted.ifBlank { "File in $rootFolderName: $fileName" },
+                            aiSource = "Not Stated"
+                        )
+                    }
+                }
+            }
+        } else if (createForRootIfNoSubfolders) {
+            // The user selected a single project folder directly (or an empty folder)
+            val expectedUri = treeUri.toString()
+            var proj = existingProjects.firstOrNull {
+                it.linkedFolderUri == expectedUri || it.name.equals(rootFolderName.replace('_', ' '), ignoreCase = true)
+            }
+            if (proj == null) {
+                val created = createProject(
+                    name = rootFolderName.replace('_', ' '),
+                    purpose = "Linked folder on phone: $rootFolderName",
+                    projectType = ProjectType.SOFTWARE,
+                    resumePointSummary = "Check scanned files in $rootFolderName."
+                )
+                proj = created.copy(
+                    linkedFolderUri = expectedUri,
+                    linkedFolderDisplayName = rootFolderName,
+                    permissionState = FolderPermissionState.CONNECTED.name
+                )
+                dao.upsertProject(proj)
+                existingProjects.add(proj)
+            } else {
+                proj = proj.copy(
+                    linkedFolderUri = expectedUri,
+                    linkedFolderDisplayName = rootFolderName,
+                    permissionState = FolderPermissionState.CONNECTED.name
+                )
+                dao.upsertProject(proj)
+            }
+            scanConnectedSafFolderReadOnly(context, proj.projectId)
+            projectsTouched = 1
+        }
+
+        return projectsTouched
     }
 
     /**
      * Background FileScanner:
-     * Monitors the designated Project Compass root directory and all project folders:
-     * - Automatically discovers any new project subfolders created by FileMate in `Project_Compass/`.
-     * - Routes loose files dropped in the root `Project_Compass/` folder into Unassigned Inbox.
+     * Monitors the user's connected Project Compass folder on their phone (via SAF) as well as internal folders:
+     * - Automatically discovers any new project subfolders created by FileMate in `Project Compass/`.
+     * - Routes loose files dropped in the root `Project Compass/` folder into Unassigned Inbox.
      * - Scans all active project folders for new incoming handovers/documents, compares them against
      *   existing Approved Project Brain rules, and automatically versions clean predecessors into
      *   `Superseded/` and exact duplicates into `Review_For_Deletion/`.
      */
     suspend fun scanAllProjectCompassFoldersAutomatically(context: Context) = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences("compass_prefs", Context.MODE_PRIVATE)
+        val savedRootTreeUriStr = prefs.getString("root_compass_tree_uri", null)
+        if (!savedRootTreeUriStr.isNullOrBlank()) {
+            try {
+                val rootUri = Uri.parse(savedRootTreeUriStr)
+                val rootName = rootUri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/')
+                    ?.ifBlank { "Project Compass" } ?: "Project Compass"
+                discoverAndScanFromSafRootTree(context, rootUri, rootName, createForRootIfNoSubfolders = false)
+            } catch (_: Exception) {
+            }
+        }
+
         val compassRootDir = File(context.filesDir, "Project_Compass").apply { mkdirs() }
         val existingProjects = dao.getAllProjectsSnapshot().toMutableList()
         val existingDocs = dao.getAllDocumentsSnapshot()
 
-        // 1. Check root Project_Compass directory for new subfolders or loose unassigned files
+        // 1. Check internal Project_Compass directory for any subfolders or loose files
         compassRootDir.listFiles()?.forEach { entry ->
             if (entry.isDirectory) {
                 val expectedUri = "compass://demo-folder/${entry.absolutePath}"

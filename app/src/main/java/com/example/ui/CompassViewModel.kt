@@ -220,6 +220,23 @@ class CompassViewModel(private val repository: CompassRepository) : ViewModel() 
         }
     }
 
+    fun connectRootCompassFolder(context: Context, treeUri: Uri) {
+        viewModelScope.launch {
+            val msg = repository.connectRootCompassFolderOnPhone(context, treeUri)
+            _statusBannerMessage.value = msg
+        }
+    }
+
+    fun deleteProject(projectId: String, projectName: String) {
+        viewModelScope.launch {
+            if (_selectedProjectId.value == projectId) {
+                _selectedProjectId.value = null
+            }
+            repository.deleteProjectCompletely(projectId)
+            _statusBannerMessage.value = "Deleted project '$projectName'."
+        }
+    }
+
     fun connectSafFolder(context: Context, projectId: String, treeUri: Uri) {
         viewModelScope.launch {
             val msg = repository.connectSafFolderAndScanReadOnly(context, projectId, treeUri)
@@ -256,15 +273,6 @@ class CompassViewModel(private val repository: CompassRepository) : ViewModel() 
                     repository.scanAllProjectCompassFoldersAutomatically(appContext)
                 }
             }
-        }
-    }
-
-    fun importDemoPopulatedFolder(context: Context) {
-        viewModelScope.launch {
-            val project = repository.importDemoPopulatedProjectReadOnly(context)
-            _selectedProjectId.value = project.projectId
-            _selectedProjectSection.value = ProjectSectionTab.CLEANUP
-            _statusBannerMessage.value = "Scanned folder: Claude v1 was auto-moved to Superseded/, duplicate moved to Review_For_Deletion/, and ChatGPT v2 was held by the Safety Brake because it left out a requirement!"
         }
     }
 

@@ -136,4 +136,22 @@ interface CompassDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertJournalOperations(ops: List<FileOperationJournalEntity>)
+
+    @Query("DELETE FROM projects WHERE projectId = :projectId")
+    suspend fun deleteProjectById(projectId: String)
+
+    @Query("DELETE FROM work_areas WHERE projectId = :projectId")
+    suspend fun deleteWorkAreasForProject(projectId: String)
+
+    @Query("DELETE FROM documents WHERE projectId = :projectId")
+    suspend fun deleteDocumentsForProject(projectId: String)
+
+    @Query("DELETE FROM brain_items WHERE projectId = :projectId")
+    suspend fun deleteBrainItemsForProject(projectId: String)
+
+    @Query("DELETE FROM change_trail_entries WHERE projectId = :projectId")
+    suspend fun deleteChangeTrailForProject(projectId: String)
+
+    @Query("DELETE FROM file_operation_journal WHERE projectId = :projectId")
+    suspend fun deleteJournalForProject(projectId: String)
 }

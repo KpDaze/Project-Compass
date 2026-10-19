@@ -233,6 +233,9 @@ fun ProjectCompassApp(viewModel: CompassViewModel) {
                         },
                         onExportHandoverMarkdown = { areaId ->
                             viewModel.generateHandoverMarkdown(projectId, areaId)
+                        },
+                        onConnectProjectFolder = { treeUri ->
+                            viewModel.connectSafFolder(context, projectId, treeUri)
                         }
                     )
                 } else {
@@ -279,8 +282,11 @@ private fun GlobalTabsContent(
                         proj.externalLinksJson
                     )
                 },
-                onImportDemoProject = {
-                    viewModel.importDemoPopulatedFolder(context)
+                onConnectRootFolder = { treeUri ->
+                    viewModel.connectRootCompassFolder(context, treeUri)
+                },
+                onDeleteProject = { proj ->
+                    viewModel.deleteProject(proj.projectId, proj.name)
                 }
             )
         }

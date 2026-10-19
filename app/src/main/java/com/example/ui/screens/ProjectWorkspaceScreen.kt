@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -110,9 +112,17 @@ fun ProjectWorkspaceScreen(
     onResolveChangeAlert: (String, Boolean, String) -> Unit,
     onUpdateDocumentMeta: (String, String?, String, String, DocumentLifecycleCategory) -> Unit,
     onUndoJournalOp: (String) -> Unit,
-    onExportHandoverMarkdown: (String?) -> Unit
+    onExportHandoverMarkdown: (String?) -> Unit,
+    onConnectProjectFolder: (Uri) -> Unit = {}
 ) {
     BackHandler { onBackToProjects() }
+    val projectFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            onConnectProjectFolder(treeUri)
+        }
+    }
 
     var showEditProjectDialog by remember { mutableStateOf(false) }
     var showAddBrainDialog by remember { mutableStateOf(false) }
@@ -202,6 +212,7 @@ fun ProjectWorkspaceScreen(
                         brainItems = brainItems,
                         changeTrail = changeTrail,
                         onRefreshFolder = onRefreshFolderReadOnly,
+                        onPickPhoneFolder = { projectFolderLauncher.launch(null) },
                         onAddBrainItem = { showAddBrainDialog = true },
                         onJumpToSection = onSelectSection
                     )
@@ -330,6 +341,7 @@ private fun OverviewSectionContent(
     brainItems: List<BrainItemEntity>,
     changeTrail: List<ChangeTrailEntity>,
     onRefreshFolder: () -> Unit,
+    onPickPhoneFolder: () -> Unit,
     onAddBrainItem: () -> Unit,
     onJumpToSection: (ProjectSectionTab) -> Unit
 ) {
@@ -491,7 +503,10 @@ private fun OverviewSectionContent(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Button(
                             onClick = onRefreshFolder,
                             modifier = Modifier.testTag("refresh_folder_button")
@@ -499,6 +514,14 @@ private fun OverviewSectionContent(
                             Icon(Icons.Default.Refresh, contentDescription = "Scan Folder", modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Scan Folder Now")
+                        }
+                        OutlinedButton(
+                            onClick = onPickPhoneFolder,
+                            modifier = Modifier.testTag("link_phone_folder_button")
+                        ) {
+                            Icon(Icons.Default.Folder, contentDescription = "Link Phone Folder", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Link Phone Folder")
                         }
                         OutlinedButton(
                             onClick = { onJumpToSection(ProjectSectionTab.CLEANUP) }
